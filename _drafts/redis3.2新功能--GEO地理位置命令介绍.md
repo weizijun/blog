@@ -1,8 +1,15 @@
-title: redis GEO地理位置命令介绍
-tags:
+title: redis3.2新功能--GEO地理位置命令介绍
+categories: redis
+tags: 
+- redis
+- geohash
+date: 2016-01-17 00:00:00
+
 ---
 ## 概述
-GEO目前提供以下6个命令。
+
+redis3.2版本前段时间发布rc版本，3.2版本中增加的最大功能就是对GEO（地理位置）的支持。说起redis的GEO特性，最大的贡献还是咱们中国人。redis作者在对3.2引进新特性的博客中介绍了为什么支持GEO。GEO hashing的api是在Ardb实现的，Ardb是github用户yinqiwen实现的基于redis协议实现的nosql系统，Ardb支持除了redis、还有LevelDB、RocksDB
+、LMDB等kv引擎。其中Ardb实现了GEO hashing功能。从Ardb作者的用户名和标识的位置在深圳可以看出Ardb作者应该是咱中国人。Ardb是用c++写的。redis另一个开发者Matt Stancliff从Ardb提取GEO库，用C语言改写，整合进redis的一个自己的分支，并被redis作者接受，合并进了3.2版本。GEO目前提供以下6个命令。
 
 *	1、geoadd：增加某个地理位置的坐标。
 *	2、geopos：获取某个地理位置的坐标。
@@ -22,6 +29,7 @@ geoadd用来增加地理位置的坐标，可以批量添加地理位置，命�
 
 	GEOADD key longitude latitude member [longitude latitude member ...]
 
+key标识一个地理位置的集合。`longitude latitude member`标识了一个地理位置的坐标。longitude是地理位置的经度，latitude是地理位置的纬度。member是该地理位置的名称。GEOADD可以批量给集合添加一批地理位置。
 
 ### geopos
 
@@ -49,6 +57,12 @@ georadius可以根据给定地理位置坐标获取指定范围内的地理位�
 
 	GEORADIUS key longitude latitude radius m|km|ft|mi [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count]
 	
+`longitude latitude`标识了地理位置的坐标，radius表示范围距离，距离单位可以为m|km|ft|mi，还有一些可选参数：
+
+*	WITHCOORD：
+*	WITHDIST：
+*	WITHHASH：
+*	COUNT count：
 	
 ### georadiusbymember
 
@@ -69,7 +83,7 @@ geohash可以获取某个地理位置的geohash值。geohash是将二维的经�
 redis GEO实现主要包含了以下两项技术：
 
 *	1、使用geohash保存地理位置的坐标。
-*	2、使用有序集合保存地理位置的集合。
+*	2、使用有序集合（zset）保存地理位置的集合。
 
 ### geohash
 
@@ -94,6 +108,8 @@ geodist命令先根据两个地理位置各自得到坐标，然后计算两个�
 georadius和georadiusbymember使用相同的实现，georadiusbymember多了一步把地理位置转换成对应的坐标。然后查找该坐标和周围对应8个坐标符合距离要求的地理位置。因为geohash得到的值其实是个格子，并不是点，这样通过计算周围对应8个坐标就能解决边缘问题。由于使用有序集合保存地理位置，在对地列位置基于范围查询，就相当于实现了zrange命令，内部的实现确实与zrange命令一致，只是geo有些特别的处理，比如获得的某个地理位置，还需要计算该地理位置是否符合给定的距离访问。
 
 geohash则直接返回了地理位置的geohash值。
+
+redis关于geohash使用了Ardb的geohash库`geohash-int`，该geohash编码长度为11位。可以精确到14.9cm的精度。
 
 参考文献：
 
