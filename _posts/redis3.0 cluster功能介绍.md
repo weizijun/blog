@@ -102,7 +102,7 @@ redis集群版对多key命令的支持，只能支持多key都在同一个slot�
 *	跳过断开连接和已经在ping还没收到pong响应的节点。
 *	从筛选的节点中选择最近一次接收pong回复距离现在最旧的节点。
 
-除了常规的选择节点外，对于那些一直未随机到节点，redis也有所支撑。当有节点距离上一次接收到pong消息超过节点超时配置的一半，节点就会给这些节点发送ping消息。
+除了常规的选择节点外，对于那些一直未随机到节点，redis也有所支持。当有节点距离上一次接收到pong消息超过节点超时配置的一半，节点就会给这些节点发送ping消息。
 
 ping消息会带上其他节点的信息，选择其他节点步骤是：
 
@@ -119,7 +119,7 @@ ping消息会把发送节点的ping_sent改成当前时间，直到接收到pong
 
 slot更新这里要细说下。假设这里是节点A接收到节点B的消息。A节点会取出保存的B节点的分布表与消息的分布表进行对比，B节点如果是slave，则比较的是A节点保存的B的master的分布表和消息中的分布表。比较只是使用memcmp简单的比较两份数据是否一样，一样则无需处理，不一样就处理不一致的slot。更新的时候，这里只是处理消息中分布表为1的slot。如果和A节点保持一致或者该slot正准备迁移到A节点，则继续处理。如果slot产生了冲突，则以epoch大的为准。如果冲突的slot中有A自己负责的节点，而且B比A的epoch大导致需要更新slot为B负责，此时A负责的slot为0的时候，可以认为B是A的slave。这种情况经常发生在A由原来的master变成slave，B提升为master的场景下。
 
-前面说到slot更新的时候，如果B比A的epoch大，则A更新对slot的认识。如果A比B的epoch在redis接下来的逻辑会再次处理，A会给B发送update消息，B收到A发送的update消息，执行slot更新方法。这种情况也经常发生在主从切换的时候。第一种情况发生在新master把数据分布表推给旧master。第二种情况发生在旧master给新master发消息的时候，新master给旧master发送update消息。
+前面说到slot更新的时候，如果B比A的epoch大，则A更新对slot的认识。如果A比B的epoch大， 在redis接下来的逻辑会再次处理，A会给B发送update消息，B收到A发送的update消息，执行slot更新方法。这种情况也经常发生在主从切换的时候。第一种情况发生在新master把数据分布表推给旧master。第二种情况发生在旧master给新master发消息的时候，新master给旧master发送update消息。
 
 ### slot迁移
 
@@ -176,7 +176,7 @@ redis cluster支持slot的动态迁移，迁移需要按照指定步骤进行，
 
 集群主节点出现故障，发生故障转移时，其他主节点会把故障主节点的从节点自动提为主节点，原来的主节点恢复后，自动成为新主节点的从节点。
 
-这里先说明，把一个master和它的全部slave描述为一个group，故障转移是以group为单位的，集群故障转移的方式跟sentinel的实现很类似。某个节点一段时间没收到心跳响应，则集群内的master会把该节点标记为pfail，类似sentinel的sdown。集群间的节点会交换相互的认识，超过一半master认为该异常master宕机，则这些master把异常master标记为fail，类似sentinel的odown。fail消息会被master广播出来。group的slave收到fail消息后开始竞选成为master。竞选的方式跟sentinel选主的方式类似，都是使用了raft协议，slave会从其他的master拉取选票，票数最多的slave被选为新的master，新master会马上给集群内的其他节点发送pong消息，告知自己角色的提升。其他slave接着开始复制新master。等旧master上线后，发现新master的epoch高于自己，通过gossip消息交互，把自己变成了slave。大致就是这么个流程。自动故障转移的方式跟sentinel很像，具体步骤可以参考本人写的《redis sentinel(哨兵) 设计与实现》。
+这里先说明，把一个master和它的全部slave描述为一个group，故障转移是以group为单位的，集群故障转移的方式跟sentinel的实现很类似。某个节点一段时间没收到心跳响应，则集群内的master会把该节点标记为pfail，类似sentinel的sdown。集群间的节点会交换相互的认识，超过一半master认为该异常master宕机，则这些master把异常master标记为fail，类似sentinel的odown。fail消息会被master广播出来。group的slave收到fail消息后开始竞选成为master。竞选的方式跟sentinel选主的方式类似，都是使用了raft协议，slave会从其他的master拉取选票，票数最多的slave被选为新的master，新master会马上给集群内的其他节点发送pong消息，告知自己角色的提升。其他slave接着开始复制新master。等旧master上线后，发现新master的epoch高于自己，通过gossip消息交互，把自己变成了slave。大致就是这么个流程。自动故障转移的方式跟sentinel很像，具体步骤可以参考本人写的[《redis sentinel 设计与实现》](http://weizijun.cn/2015/04/30/redis%20sentinel%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0/)。
 
 redis还支持手动的故障转移，即通过在slave上执行`cluster failover`命令，可以让slave提升为master。failover命令支持传入FORCE和TAKEOVER参数。
 
@@ -207,13 +207,13 @@ redis的集群模式下，客户端需要和全部的节点保持连接，这样
 redis提供了cluster countkeysinslot和cluster getkeysinslot命令，可以获得某个slot的全部key列表。通过该列表，可以实现slot的迁移。该功能是通过skiplist实现的，skiplist是redis内部用来实现zset的数据结构，在slot保持key的时候也派上了用场。redis所有在db层对hash表的操作，也会在skiplist上执行相应的操作。比如往hash表增加数据，redis也会往skiplist也写一份数据，该skiplist的score就是slot的值，value对应了具体的key。这等于是redis在数据分布表上冗余了所有的key。不过相比skiplist所带来迁移的方便，冗余的结果是可以接受的，这也期望客户端，不要使用过长的key，从而增加内存的消耗。
 
 
-#### 附录1：集群相关命令
+### 附录1：集群相关命令
 
-##### cluster meet <node IP> <node Port>
+#### cluster meet <node IP> <node Port>
 
 集群间相互握手，加入彼此所在的集群。
 
-##### cluster nodes
+#### cluster nodes
 
 获取集群间节点信息的列表，如下所示，格式为`<node ID> <node IP:PORT> <node role> [master node ID|-] <node ping_sent> <node pong_received> <node epoch> <node status>`。
 
@@ -225,14 +225,14 @@ redis提供了cluster countkeysinslot和cluster getkeysinslot命令，可以获�
 	f31f6ce49b3a2f3a246b2d97349c8f8614cf3a2c 10.180.157.208:6379 slave ecf9ae60e87ea3358d9c5f1f269e0ed9a387ea40 0 1450854212286 9 connected
 	9b35a393fa6623887215023b761d531dde452d3c 10.180.157.199:6379 myself,master - 0 0 12 connected 0-5460
 
-##### cluster myid
+#### cluster myid
 
 返回节点的id。
 
 	127.0.0.1:6379> cluster myid
 	"9b35a393fa6623887215023b761d531dde452d3c"
 
-##### cluster slots
+#### cluster slots
 
 返回集群间节点负责的数据分布表。
 
@@ -256,35 +256,35 @@ redis提供了cluster countkeysinslot和cluster getkeysinslot命令，可以获�
 	   4) 1) "10.180.157.202"
 	      2) (integer) 6379
 
-##### cluster flushslots
+#### cluster flushslots
 
 清空该节点负责slots，必须在节点负责的这些slot都没有数据的情况下才能执行，该命令需要谨慎使用，由于之前说的`bitmapTestBit`方法，redis只比较负责的节点，清空的slots信息无法被其他节点同步。
 
-##### cluster addslots <slot> [slot]
+#### cluster addslots <slot> [slot]
 
 在节点上增加slot。
 
-##### cluster delslots <slot> [slot]
+#### cluster delslots <slot> [slot]
 
 在节点上取消slot的负责。这也会导致前面说的slot信息无法同步，而且一旦集群有slot不负责，配置cluster-require-full-coverage为yes的话，该节点就无法提供服务了，所以使用也需谨慎。
 
-##### cluster setslot <slot> MIGRATING <node ID>
+#### cluster setslot <slot> MIGRATING <node ID>
 
 把本节点负责的某个slot设置为迁移到目的节点。
 
-##### cluster setslot <slot> IMPORTING <node ID>
+#### cluster setslot <slot> IMPORTING <node ID>
 
 设置某个slot为从迁移源节点迁移标志。
 
-##### cluster setslot <slot> STABLE
+#### cluster setslot <slot> STABLE
 
 设置某个slot为从迁移状态恢复为正常状态。
 
-##### cluster setslot <slot> NODE <node ID>
+#### cluster setslot <slot> NODE <node ID>
 
 设置某个slot为某节点负责。该命令使用也需要注意，cluster setslot的四个命令需要配置迁移工具使用，单独使用容易引起集群混乱。该命令在集群出现异常时，需要指定某个slot为某个节点负责时，最好在每个节点上都执行一遍，至少要在迁移的节点和最高epoch的节点上执行成功。
 
-##### cluster info
+#### cluster info
 
 集群的一些info信息。
 
@@ -301,25 +301,25 @@ redis提供了cluster countkeysinslot和cluster getkeysinslot命令，可以获�
 	cluster_stats_messages_sent:1449982
 	cluster_stats_messages_received:1182698
 
-##### cluster saveconfig
+#### cluster saveconfig
 
 保存集群的配置文件，集群默认在配置修改的时候会自动保存配置文件，该方法也能手动执行命令保存。
 
-##### cluster keyslot <key>
+#### cluster keyslot <key>
 
 可以查询某个key对应的slot地址。
 
 	127.0.0.1:6379> cluster keyslot key
 	(integer) 12539
 	
-##### cluster countkeysinslot <slot>
+#### cluster countkeysinslot <slot>
 
 可以查询该节点负责的某个slot内部key的数量。
 
 	127.0.0.1:6379> cluster countkeysinslot 13252
 	(integer) 2
 
-##### cluster getkeysinslot <slot> <count>
+#### cluster getkeysinslot <slot> <count>
 
 可以查询该节点负责的某个slot内部指定数量的key列表。
 
@@ -327,82 +327,82 @@ redis提供了cluster countkeysinslot和cluster getkeysinslot命令，可以获�
 	1) "key0"
 	2) "key2298"
 
-##### cluster forget <NODE ID>
+#### cluster forget <NODE ID>
 
 把某个节点加入黑名单，这样就无法完成握手。黑名单的过期时为60s，60s后两节点又会继续完成握手。
 
-##### cluster replicate <NODE ID>
+#### cluster replicate <NODE ID>
 
 负责某个节点，成为它的slave。
 
-##### cluster slaves <NODE ID>
+#### cluster slaves <NODE ID>
 
 列出某个节点slave列表。
 
 	127.0.0.1:6379> cluster slaves 2b5603326d0fca28031467727fae4558115a99d8
 	1) "a15705fdb7cac60e07ff699bf4c514e80f245a2c 10.180.157.205:6379 slave 2b5603326d0fca28031467727fae4558115a99d8 0 1450854932667 11 connected"
 
-##### cluster count-failure-reports <NODE ID>
+#### cluster count-failure-reports <NODE ID>
 
 列出某个节点的故障转移记录的长度。
 
-##### cluster failover [FORCE|TAKEOVER]
+#### cluster failover [FORCE|TAKEOVER]
 
 手动执行故障转移。
 
-##### cluster set-config-epoch <epoch>
+#### cluster set-config-epoch <epoch>
 
 设置节点epoch，只有在节点加入集群前才能设置。
 
-##### cluster reset [SOFT|HARD]
+#### cluster reset [SOFT|HARD]
 
 重置集群信息，soft是清空其他节点的信息，但不修改自己的id。hard还会修改自己的id。不传该参数则使用soft方式。
 
-##### readonly
+#### readonly
 在slave上执行，执行该命令后，可以在slave上执行只读命令。
 
-##### readwrite
+#### readwrite
 在slave上执行，执行该命令后，取消在slave上执行命令。
 
 
-#### 附录2：集群相关配置
+### 附录2：集群相关配置
 
-##### cluster-enabled
+#### cluster-enabled
 
 *	说明：集群开关，默认是不开启集群模式。
 *	默认值:no。
 *	是否可以动态修改:no。
 *	值的范围:yes\|no。
 
-##### cluster-config-file
+#### cluster-config-file
 
 *	说明：集群配置文件的名称，每个节点都有一个集群相关的配置文件，持久化保存集群的信息。
 *	默认值:"nodes.conf"。
 *	是否可以动态修改:no。
 *	值的范围:文件路径。
 
-##### cluster-node-timeout
+#### cluster-node-timeout
 
 *	说明：节点的超时时间，单位是毫秒。
 *	默认值:15000。
 *	是否可以动态修改:yes。
 *	值的范围:大于0。
 
-##### cluster-slave-validity-factor
+#### cluster-slave-validity-factor
 
 *	说明：在进行故障转移的时候，group的全部slave都会请求申请为master，但是有些slave可能与master断开连接一段时间了，导致数据过于陈旧，这样的slave不应该被提升为master。该参数就是用来判断slave节点与master断线的时间是否过长。判断方法是比较slave断开连接的时间和`(node-timeout * slave-validity-factor) + repl-ping-slave-period`。
 *	默认值:10。
 *	是否可以动态修改:yes。
 *	值的范围:大于等于0。
 
-##### cluster-migration-barrier
+#### cluster-migration-barrier
 
 *	说明：master的slave数量大于该值，slave才能迁移到其他孤儿master上，具体说明见`均衡集群的slave`章节。
 *	默认值:1。
 *	是否可以动态修改:yes。
 *	值的范围:大于等于0。
 
-##### cluster-require-full-coverage
+#### cluster-require-full-coverage
 
 *	说明：默认情况下，集群全部的slot有节点负责，集群状态才为ok，才能提供服务。设置为no，可以在slot没有全部分配的时候提供服务。不建议打开该配置，这样会造成分区的时候，小分区的master一直在接受写请求，而造成很长时间数据不一致。
 *	默认值:yes。
