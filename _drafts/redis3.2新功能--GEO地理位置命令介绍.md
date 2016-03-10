@@ -97,7 +97,7 @@ geohash的思想是将二维的经纬度转换成一维的字符串，geohash有
 
 ### redis GEO命令实现
 
-知道了redis使用有序集合保存地理位置数据，以及geohash的特性，就很容易理解redis是如何实现redis GEO命令了。
+知道了redis使用有序集合（zset）保存地理位置数据，以及geohash的特性，就很容易理解redis是如何实现redis GEO命令了。细心的读者可能发现，redis没有实现地理位置的删除命令。不过在知道了redis GEO命令是用有序集合保存，可以知道删除某个地理位置可以用zrem来完成。
 
 geoadd命令增加地理位置的时候，会先计算地理位置坐标的geohash值，然后地理位置作为有序集合的member，geohash作为该member的score。
 
@@ -109,7 +109,11 @@ georadius和georadiusbymember使用相同的实现，georadiusbymember多了一�
 
 geohash则直接返回了地理位置的geohash值。
 
-redis关于geohash使用了Ardb的geohash库`geohash-int`，该geohash编码长度为11位。可以精确到14.9cm的精度。
+redis关于geohash使用了Ardb的geohash库`geohash-int`，redis使用的geohash编码长度为26位。可以精确到0.59m的精度。
+
+## 总结
+
+通过本文，拨开GEO身后的云雾，可以看出redis借助了有序集合（zset）和geohash，加上redis本身实现的命令框架，可以很容易的实现地理位置相关的命令。
 
 参考文献：
 
