@@ -14,7 +14,7 @@ redis从3.0开始支持集群功能。redis集群采用无中心节点方式实�
 
 ![Alt text](../images/cluster_art.jpg)
 
-每个节点都会跟其他节点保持连接，用来交换彼此的信息。节点组成集群的方式使用`cluster meet`命令，meet命令可以让两个节点相互握手，然后通过gossip协议交换信息。如果一个节点r1在集群中，新节点r2加入的时候与r1节点握手，r1节点会把集群内的其他节点信息通过gossip协议发送给r2，r2会一一与这些节点完成握手，从而加入到集群中。
+每个节点都会跟其他节点保持连接，用来交换彼此的信息。节点组成集群的方式使用`cluster meet`命令，meet命令可以让两个节点相互握手，然后通过gossip协议交换信息。如果一个节点r1在集群中，新节点r4加入的时候与r1节点握手，r1节点会把集群内的其他节点信息通过gossip协议发送给r4，r4会一一与这些节点完成握手，从而加入到集群中。
 
 ![Alt text](../images/cluster_meet.jpg)
 
@@ -22,7 +22,7 @@ redis从3.0开始支持集群功能。redis集群采用无中心节点方式实�
 
 ### 集群数据分布
 
-集群数据以数据分布表的方式保存在各个slot上。默认的数据分布表默认含有16384个slot。
+集群数据以数据分布表的方式保存在各个slot上。数据分布表默认含有16384个slot。
 
 ![Alt text](../images/cluster_slots.png)
 
@@ -33,7 +33,7 @@ key与slot映射使用的CRC16算法，即：slot = CRC16(key) mod 16384。
 
 ![Alt text](../images/cluster_slot2.png)
 
-使用这样的方式传输，就能大大减少数据分布表的字节。这种方式使用的字节为2048，如果纯粹的传递数据分布表，那边一个slot至少需要2字节的slot值+2字节port+4字节ip，共8 * 16384=131072字节，或者以ip、port为键，把节点对应的slot放在后面，那么也至少需要2 * 16384加上节点的数量，也远远大于2048字节。由于节点间不停的在传递数据分布表，所以为了节省带宽，redis选择了只传递自己的分布数据。但这样的方式也会带来管理方面的麻烦，如果一个节点删除了自己负责的某个slot，这样该节点传递给其他节点数据分布表的slot标识为0，而redis采用了`bitmapTestBit`方法，只处理slot为1的节点，而并未把每个slot与收到的数据分布表对比，从而产生了节点间数据分布表视图的不一致。这种问题目前只能通过使用者来避免。
+使用这样的方式传输，就能大大减少数据分布表的字节。这种方式使用的字节为2048，如果纯粹的传递数据分布表，那边一个slot至少需要2字节的slot值+2字节port+4字节ip，共8 * 16384=131072字节，或者以ip、port为键，把节点对应的slot放在后面，那么也至少需要2 \* 16384加上节点的数量，也远远大于2048字节。由于节点间不停的在传递数据分布表，所以为了节省带宽，redis选择了只传递自己的分布数据。但这样的方式也会带来管理方面的麻烦，如果一个节点删除了自己负责的某个slot，这样该节点传递给其他节点数据分布表的slot标识为0，而redis采用了`bitmapTestBit`方法，只处理slot为1的节点，而并未把每个slot与收到的数据分布表对比，从而产生了节点间数据分布表视图的不一致。这种问题目前只能通过使用者来避免。
 
 redis目前还支持slot的迁移，可以把一个slot从一个节点迁移到另一个节点，节点上的数据需要使用者通过`cluster getkeysinslot`去除迁移slot上的key，然后执行`migrate`命令一个个迁移到新节点。具体细节会在下面的`slot迁移`章节介绍。
 
@@ -45,7 +45,7 @@ redis目前还支持slot的迁移，可以把一个slot从一个节点迁移到�
 
 这些细节一般都会被客户端sdk封装起来，使用者完全感受不到访问的是集群还是单节点。
 
-集群支持hash tags功能，即可以把一类key定位到同一个节点，tag的标识目前支持配置，只能使用`{}`，redis处理hash tag的逻辑也很简单，redis只计算从第一次出现`{`，到第一次出现`}`的substring的hash值，substring为空，则仍然计算整个key的值，这样对于foo{}{bar}、{foo}{bar}、foo{{bar}}这些冲突的`{}`，也能取出tag值。使用者需遵循redis的hash tag规范。
+集群支持hash tags功能，即可以把一类key定位到同一个slot，tag的标识目前不支持配置，只能使用`{}`，redis处理hash tag的逻辑也很简单，redis只计算从第一次出现`{`，到第一次出现`}`的substring的hash值，substring为空，则仍然计算整个key的值，这样对于foo{}{bar}、{foo}{bar}、foo{{bar}}这些冲突的`{}`，也能取出tag值。使用者需遵循redis的hash tag规范。
 
 	127.0.0.1:6379> CLUSTER KEYSLOT foo{hash_tag}
 	(integer) 2515
@@ -65,14 +65,14 @@ redis集群版只使用db0，select命令虽然能够支持select 0。其他的d
 	127.0.0.1:6379> select 1
 	(error) ERR SELECT is not allowed in cluster mode
 
-redis集群版对多key命令的支持，只能支持多key都在同一个slot上，即使多个slot在一个节点上也不行。
+redis集群版对多key命令的支持，只能支持多key都在同一个slot上，即使多个slot在同一个节点上也不行。
 
 	127.0.0.1:6379> mget key7 key28
 	(error) CROSSSLOT Keys in request don't hash to the same slot
 
 事务的支持只能在也一个slot上完成。`MULTI`命令之后的命令的key必须都在同一个slot上，如果某条命令的key对应不在相同的slot上，则事务直接回滚。迁移的时候，在迁移源节点执行命令的key必须在移原节点上存在，否则事务就会回滚。在迁移目的节点执行的时候需要先执行`ASKING`命令再执行`MULTI`命令，这样接下来该slot的命令都能被执行。可以看出，对于单key和相同hash tags的事务，集群还是能很好的支持。
 
-在迁移的时候有个地方需要注意，对于多key命令在迁移目的节点执行时，如果多个key全在该节点上，则命令无法执行。如下所示，key和key14939对应的slot为12539，执行命令的节点是迁移目的节点：
+在迁移的时候有个地方需要注意，对于多key命令在迁移目的节点执行时，如果多个key不全在该节点上，则命令无法执行。如下所示，key和key14939对应的slot为12539，其中key在目的节点，key14939既不在目的节点也不在源节点，执行命令的节点是迁移目的节点：
 
 	127.0.0.1:6379> asking
 	OK
@@ -82,7 +82,7 @@ redis集群版对多key命令的支持，只能支持多key都在同一个slot�
 
 ### 集群消息
 
-集群间互相发送消息，使用另外的端口，所有的消息在该端口上完成，可以成为消息总线，这样可以做到不影响客户端访问redis，可见redis对于性能的追求。目前集群有如下几种消息：
+集群间互相发送消息，使用另外的端口，所有的消息在该端口上完成，可以称为消息总线，这样可以做到不影响客户端访问redis，可见redis对于性能的追求。目前集群有如下几种消息：
 
 *	CLUSTERMSG_TYPE_PING：gossip协议的ping消息。
 *	CLUSTERMSG_TYPE_PONG：gossip协议的pong消息。
@@ -94,7 +94,7 @@ redis集群版对多key命令的支持，只能支持多key都在同一个slot�
 *	CLUSTERMSG_TYPE_UPDATE：通知某节点，它负责的某些slot被另一个节点替换。
 *	CLUSTERMSG_TYPE_MFSTART：手动故障转移时，slave请求master停止访问，从而对比两者的数据偏移量，可以达到一致。
 
-集群节点间相互通信使用了gossip协议的push/pull方式，ping和pong消息，节点会把自己的详细信息和已经和自己完成握手的3个节点地址发送给对方，详细信息包括消息类型，集群当前的epoch，节点自己的epoch，节点复制偏移量，节点名称，节点数据分布表，节点master的名称，节点地址，节点flag为，节点所处的集群状态。节点根据自己的epoch和对方的epoch来决定哪些数据需要更新，哪些数据需要告诉对方更新。然后根据对方发送的其他地址信息，来发现新节点的加入，从而和新节点完成握手。
+集群节点间相互通信使用了gossip协议的push/pull方式，ping和pong消息，节点会把自己的详细信息和已经跟自己完成握手的3个节点地址发送给对方，详细信息包括消息类型，集群当前的epoch，节点自己的epoch，节点复制偏移量，节点名称，节点数据分布表，节点master的名称，节点地址，节点flag位，节点所处的集群状态。节点根据自己的epoch和对方的epoch来决定哪些数据需要更新，哪些数据需要告诉对方更新。然后根据对方发送的其他地址信息，来发现新节点的加入，从而和新节点完成握手。
 
 节点默认每秒在集群中的其他节点选择一个节点，发送ping消息。选择节点步骤是：
 
@@ -117,13 +117,13 @@ ping消息会把发送节点的ping_sent改成当前时间，直到接收到pong
 
 接收到某个节点发来的ping或者pong消息，节点会更新对接收节点的认识。比如该节点主从角色是否变化，该节点负责的slot是否变化，然后获取消息带上的节点信息，处理新节点的加入。
 
-slot更新这里要细说下。假设这里是节点A接收到节点B的消息。A节点会取出保存的B节点的分布表与消息的分布表进行对比，B节点如果是slave，则比较的是A节点保存的B的master的分布表和消息中的分布表。比较只是使用memcmp简单的比较两份数据是否一样，一样则无需处理，不一样就处理不一致的slot。更新的时候，这里只是处理消息中分布表为1的slot。如果和A节点保持一致或者该slot正准备迁移到A节点，则继续处理。如果slot产生了冲突，则以epoch大的为准。如果冲突的slot中有A自己负责的节点，而且B比A的epoch大导致需要更新slot为B负责，此时A负责的slot为0的时候，可以认为B是A的slave。这种情况经常发生在A由原来的master变成slave，B提升为master的场景下。
+slot更新这里要细说下。假设这里是节点A接收到节点B的消息。A节点会取出自己保存的B节点的分布表与消息的分布表进行对比，B节点如果是slave，则比较的是A节点保存的B的master的分布表和消息中的分布表。比较只是使用memcmp简单的比较两份数据是否一样，一样则无需处理，不一样就处理不一致的slot。更新的时候，这里只是处理消息中分布表为1的slot。如果和A节点保持一致或者该slot正准备迁移到A节点，则继续处理。如果slot产生了冲突，则以epoch大的为准。如果冲突的slot中有A自己负责的节点，而且B比A的epoch大导致需要更新slot为B负责，此时A负责的slot为0的时候，可以认为B是A的slave。这种情况经常发生在A由原来的master变成slave，B提升为master的场景下。
 
 前面说到slot更新的时候，如果B比A的epoch大，则A更新对slot的认识。如果A比B的epoch大， 在redis接下来的逻辑会再次处理，A会给B发送update消息，B收到A发送的update消息，执行slot更新方法。这种情况也经常发生在主从切换的时候。第一种情况发生在新master把数据分布表推给旧master。第二种情况发生在旧master给新master发消息的时候，新master给旧master发送update消息。
 
 ### slot迁移
 
-redis cluster支持slot的动态迁移，迁移需要按照指定步骤进行，不然可能破坏当前的集群数据分布表。`cluster setslot <slot> IMPORTING <node ID>`命令在迁移目的节点执行，表示需要把该slot迁移到本节点。redis的`cluster setslot`命令提供了对迁移的支持。`cluster setslot <slot> MIGRATING <node ID>`命令在迁移源节点执行，表示需要把该slot迁出。`cluster setslot <slot> NODE <node ID>`在迁移完成后在迁移源节点和迁移目的节点执行后，表示迁移完成，数据分布表恢复稳定。如果需要取消迁移操作，在迁移源节点和迁移目的节点上执行`cluster setslot <slot> STABLE`。
+redis cluster支持slot的动态迁移，迁移需要按照指定步骤进行，不然可能破坏当前的集群数据分布表。redis的`cluster setslot`命令提供了对迁移的支持。`cluster setslot <slot> IMPORTING <node ID>`命令在迁移目的节点执行，表示需要把该slot迁移到本节点。`cluster setslot <slot> MIGRATING <node ID>`命令在迁移源节点执行，表示需要把该slot迁出。`cluster setslot <slot> NODE <node ID>`在迁移完成后在迁移源节点和迁移目的节点执行后，表示迁移完成，数据分布表恢复稳定。如果需要取消迁移操作，在迁移源节点和迁移目的节点上执行`cluster setslot <slot> STABLE`。
 
 下面先来看一下完整的迁移流程：
 
@@ -136,7 +136,7 @@ redis cluster支持slot的动态迁移，迁移需要按照指定步骤进行，
 
 ![Alt text](../images/cluster_import.jpeg)
 
-迁移过程中该slot允许继续有流量进来，redis保证了迁移过程中slot的正常访问。在迁移过程中，对于该slot的请求，如果key在源节点，则表示该key还没有迁移到目的节点。源节点会返回ASK错误，告诉客户端去迁移目的节点请求。这样新的key就直接写入到迁移目的节点了。客户端写入目的节点前需要发送ASKING命令，告诉迁移目的节点我是写入增量数据，没有ASKING命令，迁移目的节点会不认这次请求，返回MOVED错误，告诉客户端去迁移源节点请求。
+迁移过程中该slot允许继续有流量进来，redis保证了迁移过程中slot的正常访问。在迁移过程中，对于该slot的请求，如果key在源节点，则表示该key还没有迁移到目的节点。如果key不在源节点，源节点会返回ASK错误，告诉客户端去迁移目的节点请求。这样新的key就直接写入到迁移目的节点了。客户端写入目的节点前需要发送ASKING命令，告诉迁移目的节点我是写入增量数据，没有ASKING命令，迁移目的节点会不认这次请求，返回MOVED错误，告诉客户端去迁移源节点请求。
 
 凭借`ASK机制`和`migrate`命令，redis能保证slot的全量数据和增量数据都能导入目的节点。因为对于源节点返回了ASK错误，就能保证该key不在源节点上，那么它只会出现在目的节点或者不存在。所以客户端获取ASK错误到向目的节点无需保证原子性。然后`migrate`命令是个原子操作，它会等待目的节点写入成功才在源节点返回，保证了迁移期间不接受其他请求，从一个外部客户端的视角来看，在某个时间点上，迁移的键要么存在于源节点，要么存在于目的节点，但不会同时存在于源节点和目的节点。
 
@@ -176,12 +176,12 @@ redis cluster支持slot的动态迁移，迁移需要按照指定步骤进行，
 
 集群主节点出现故障，发生故障转移时，其他主节点会把故障主节点的从节点自动提为主节点，原来的主节点恢复后，自动成为新主节点的从节点。
 
-这里先说明，把一个master和它的全部slave描述为一个group，故障转移是以group为单位的，集群故障转移的方式跟sentinel的实现很类似。某个节点一段时间没收到心跳响应，则集群内的master会把该节点标记为pfail，类似sentinel的sdown。集群间的节点会交换相互的认识，超过一半master认为该异常master宕机，则这些master把异常master标记为fail，类似sentinel的odown。fail消息会被master广播出来。group的slave收到fail消息后开始竞选成为master。竞选的方式跟sentinel选主的方式类似，都是使用了raft协议，slave会从其他的master拉取选票，票数最多的slave被选为新的master，新master会马上给集群内的其他节点发送pong消息，告知自己角色的提升。其他slave接着开始复制新master。等旧master上线后，发现新master的epoch高于自己，通过gossip消息交互，把自己变成了slave。大致就是这么个流程。自动故障转移的方式跟sentinel很像，具体步骤可以参考本人写的[《redis sentinel 设计与实现》](http://weizijun.cn/2015/04/30/redis%20sentinel%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0/)。
+这里先说明，把一个master和它的全部slave描述为一个group，故障转移是以group为单位的，集群故障转移的方式跟sentinel的实现很类似。某个master节点一段时间没收到心跳响应，则集群内的master会把该节点标记为pfail，类似sentinel的sdown。集群间的节点会交换相互的认识，超过一半master认为该异常master宕机，则这些master把异常master标记为fail，类似sentinel的odown。fail消息会被master广播出来。group的slave收到fail消息后开始竞选成为master。竞选的方式跟sentinel选主的方式类似，都是使用了raft协议，slave会从其他的master拉取选票，票数最多的slave被选为新的master，新master会马上给集群内的其他节点发送pong消息，告知自己角色的提升。其他slave接着开始复制新master。等旧master上线后，发现新master的epoch高于自己，通过gossip消息交互，把自己变成了slave。大致就是这么个流程。自动故障转移的方式跟sentinel很像，具体步骤可以参考本人写的[《redis sentinel 设计与实现》](http://weizijun.cn/2015/04/30/redis%20sentinel%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0/)。
 
 redis还支持手动的故障转移，即通过在slave上执行`cluster failover`命令，可以让slave提升为master。failover命令支持传入FORCE和TAKEOVER参数。
 
-*	FORCE：使用FORCE参数与sentinel的手动故障转移流程基本类似，强制开始一次故障转移。
 *	不传入额外参数：如果主节点异常，则不能进行failover，主节点正常的情况下需要先比较从节点和主节点的偏移量，此时会让主节点停止客户端请求，直到超时或者故障转移完成。主从偏移量相同后开始手动故障转移流程。
+*	FORCE：使用FORCE参数与sentinel的手动故障转移流程基本类似，强制开始一次故障转移。
 *	TAKEOVER：这种手动故障转移的方式比较暴力，slave直接提升自己的epoch为最大的epoch。并把自己变成master。这样在消息交互过程中，旧master能发现自己的epoch小于该slave，同时两者负责的slot一致，它会把自己降级为slave。
 
 ### 均衡集群的slave（Replica migration）
